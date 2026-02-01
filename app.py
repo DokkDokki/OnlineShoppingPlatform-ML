@@ -135,7 +135,7 @@ with tab1:
             cols = st.columns(3)
             for idx, row in enumerate(results.itertuples()):
                 with cols[idx % 3]:
-                    st.image(f"https://via.placeholder.com/300x200.png?text={row.category}", use_container_width=True)
+                    st.image(f"https://via.placeholder.com/300x200.png?text={row.category}", width='stretch')
                     st.subheader(row.product_name)
 
 # ==========================================
