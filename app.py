@@ -93,50 +93,41 @@ with tab1:
     col1, col2 = st.columns([3, 1])
     
     with col1:
-        # STEP 1: Filter by Category first
-        cat_choice = st.radio(
-            "1️⃣ Choose a Category:", 
-            options=['Gifts', 'Kitchen', 'Home Decor', 'Office', 'Accessories'], 
-            horizontal=True
-        )
-        
-        # Filter the dataframe to only show items in that category
-        filtered_products = df_products[df_products['category'] == cat_choice]
-        
-        # STEP 2: Select specific product from the smaller list
-        selected_product_name = st.selectbox(
-            "2️⃣ Select the Product:", 
-            filtered_products['product_name'].unique()
-        )
-    
+        search_query = st.text_input("Tell us what you're looking for:", "Red ceramic mug")
     with col2:
         budget = st.slider("💰 Max Budget ($)", 0, 100, 50)
 
     # THE RECOMMENDATION LOGIC
     if st.button("✨ Get Recommendations", type="primary"):
-        # 1. Find the index of the selected product (using the main dataframe)
-        idx = df_products[df_products['product_name'] == selected_product_name].index[0]
-        
-        # 2. Get similarity scores
-        sim_scores = list(enumerate(cosine_sim[idx]))
-        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)
-        
-        # 3. Get top 6 matches
-        sim_indices = [i[0] for i in sim_scores[1:7]]
-        results = df_products.iloc[sim_indices].copy()
-        
-        # 4. Filter by Budget
-        results = results[results['price'] <= budget]
-        
-        if not results.empty:
-            st.success(f"Found {len(results)} items similar to '{selected_product_name}':")
+        if search_query:
+            # Vectorize the search query
+            query_vec = tfidf.transform([search_query])
             
-            # Display results in columns
-            cols = st.columns(3)
-            for idx, row in enumerate(results.itertuples()):
-                with cols[idx % 3]:
-                    st.image(f"https://via.placeholder.com/300x200.png?text={row.category}", width='stretch')
-                    st.subheader(row.product_name)
+            # Calculate similarity between query and all products
+            query_sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
+            
+            # Get top 6 similar products
+            # Use argsort to get indices that would sort the array, then reverse for descending order
+            sim_indices = query_sim_scores.argsort()[:-7:-1] # Get top 6 indices (excluding self-similarity if query was a product)
+            
+            results = df_products.iloc[sim_indices].copy()
+            
+            # 4. Filter by Budget
+            results = results[results['price'] <= budget]
+            
+            if not results.empty:
+                st.success(f"Found {len(results)} items similar to your search: '{search_query}':")
+                
+                # Display results in columns
+                cols = st.columns(3)
+                for idx, row in enumerate(results.itertuples()):
+                    with cols[idx % 3]:
+                        st.image(f"https://via.placeholder.com/300x200.png?text={row.category}", width='stretch')
+                        st.subheader(row.product_name)
+            else:
+                st.info(f"No recommendations found for '{search_query}' within your budget.")
+        else:
+            st.warning("Please enter a product description to get recommendations.")
 
 # ==========================================
 # TAB 2: BUSINESS DASHBOARD (Protected)
