@@ -3,6 +3,8 @@ import pandas as pd
 import matplotlib.pyplot as plt
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
+from sklearn.metrics import precision_score, recall_score, f1_score
+
 
 # --- 1. SETUP & CONFIG ---
 st.set_page_config(page_title="Paul's Shop", layout="wide")
@@ -29,6 +31,44 @@ if not df_products.empty:
     tfidf = TfidfVectorizer(stop_words='english')
     tfidf_matrix = tfidf.fit_transform(df_products['features'])
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+
+# --- [MODEL EVALUATION] ---
+def evaluate_recommender(df_products, cosine_sim, k=5):
+    y_true = []
+    y_pred = []
+
+    for idx in range(len(df_products)):
+
+        # Get similarity scores for each product
+        sim_scores = list(enumerate(cosine_sim[idx]))
+
+        # Sort by similarity (exclude itself)
+        sim_scores = sorted(sim_scores, key=lambda x: x[1], reverse=True)[1:k+1]
+
+        recommended_indices = [i[0] for i in sim_scores]
+
+        query_category = df_products.iloc[idx]['category']
+
+        for rec_idx in recommended_indices:
+            recommended_category = df_products.iloc[rec_idx]['category']
+
+            # Relevant if same category
+            y_true.append(1)
+            y_pred.append(1 if recommended_category == query_category else 0)
+
+    precision = precision_score(y_true, y_pred)
+    recall = recall_score(y_true, y_pred)
+    f1 = f1_score(y_true, y_pred)
+
+    return precision, recall, f1
+
+
+precision, recall, f1 = evaluate_recommender(df_products, cosine_sim)
+
+print("Precision@K:", precision)
+print("Recall@K:", recall)
+print("F1-score@K:", f1)
+
 
 # --- 4. SIDEBAR (Login & Admin Panel) ---
 if 'admin_logged_in' not in st.session_state:
@@ -147,6 +187,16 @@ with tab2:
         kpi3.metric("Avg Order Value", f"${df_transactions['amount'].mean():.2f}")
         
         st.divider()
+
+
+        # --- [NEW: SHOW MODEL METRICS IN DASHBOARD] ---
+        st.subheader("🤖 Recommender Model Evaluation")
+        st.write(f"**Precision@5:** {precision:.2f}")
+        st.write(f"**Recall@5:** {recall:.2f}")
+        st.write(f"**F1-score@5:** {f1:.2f}")
+        
+        st.divider()
+     
 
         chart1, chart2 = st.columns(2)
         
