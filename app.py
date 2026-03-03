@@ -81,17 +81,59 @@ st.title("🛍️ Paul's Shop")
 t1, t2 = st.tabs(["🛒 AI Recommender", "📈 Business Dashboard"])
 
 with t1:
-    query = st.text_input("Search:", "Red ceramic mug")
-    budget = st.slider("Budget", 0, 500, 100)
-    if st.button("Get Recommendations"):
-        vec = tfidf.transform([query])
-        sim_scores = cosine_similarity(vec, tfidf_matrix).flatten()
-        df_products['score'] = sim_scores
-        res = df_products[df_products['price'] <= budget].sort_values('score', ascending=False).head(6)
-        cols = st.columns(3)
-        for i, row in enumerate(res.itertuples()):
-            with cols[i % 3]:
-                st.info(f"**{row.product_name}**\n\nMatch: {row.score:.1%}")
+    st.subheader("🔍 Find Your Perfect Product")
+    
+    # 1. USER INPUT SECTION
+    # We use columns to make the input area look organized
+    col_input1, col_input2, col_input3 = st.columns([2, 1, 1])
+    
+    with col_input1:
+        # Text Input: This becomes the 'query' for the AI
+        user_query = st.text_input("What are you looking for?", placeholder="e.g. Red ceramic mug")
+        
+    with col_input2:
+        # Selectbox: Let user filter by a specific category
+        available_cats = ["All"] + list(df_products['category'].unique())
+        selected_cat = st.selectbox("Category", available_cats)
+        
+    with col_input3:
+        # Slider: Set a price limit
+        max_price = st.slider("Max Budget ($)", 0, 500, 100)
+
+    # 2. TRIGGER BUTTON
+    if st.button("✨ Get Recommendations", type="primary"):
+        if user_query:
+            # Step A: Vectorize the user's input
+            query_vec = tfidf.transform([user_query])
+            
+            # Step B: Calculate Similarity
+            sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
+            df_products['score'] = sim_scores
+            
+            # Step C: Apply Filters (Budget + Category)
+            filtered_df = df_products[df_products['price'] <= max_price]
+            
+            if selected_cat != "All":
+                filtered_df = filtered_df[filtered_df['category'] == selected_cat]
+            
+            # Step D: Sort and Get Top 6
+            results = filtered_df.sort_values('score', ascending=False).head(6)
+
+            # 3. DISPLAY RESULTS
+            if not results.empty and results['score'].max() > 0:
+                st.success(f"Top matches for '{user_query}' under ${max_price}:")
+                
+                cols = st.columns(3)
+                for i, row in enumerate(results.itertuples()):
+                    with cols[i % 3]:
+                        # Optional: Use a placeholder image based on category
+                        st.image(f"https://via.placeholder.com/300x200.png?text={row.category}")
+                        st.write(f"**{row.product_name}**") # You can hide this if preferred
+                        st.write(f"Price: ${row.price} | Match: {row.score:.1%}")
+            else:
+                st.warning("No products found matching those criteria. Try a higher budget or different keywords.")
+        else:
+            st.error("Please enter a search term first!")
 
 with t2:
     if st.session_state.get('admin_logged_in'):
