@@ -8,6 +8,7 @@ from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import precision_score, recall_score
 from sklearn.metrics import confusion_matrix
+from nltk.stem import PorterStemmer
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="Paul's Shop", layout="wide")
@@ -38,9 +39,15 @@ df_products, df_transactions = load_data()
 
 # --- 3. ML MODEL ---
 if not df_products.empty:
-    # Use 'df_products' consistently to fix NameError: 'df_p'
+    # STEP 1: Create the column 
     df_products['features'] = df_products['category'].astype(str) + " " + df_products['product_name'].astype(str)
-    tfidf = TfidfVectorizer(stop_words='english')
+    
+    # STEP 2: apply the stemmer to the column created
+    ps = PorterStemmer()
+    df_products['features'] = df_products['features'].apply(lambda x: " ".join([ps.stem(word) for word in x.split()]))
+    
+    # STEP 3: Vectorize
+    tfidf = TfidfVectorizer(stop_words='english', max_features=1000, ngram_range=(1, 2))
     tfidf_matrix = tfidf.fit_transform(df_products['features'])
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
@@ -123,39 +130,22 @@ with t1:
         max_price = st.slider("Max Budget ($)", 0, 500, 100)
 
     # 2. TRIGGER BUTTON
-    if st.button("✨ Get Recommendations", type="primary"):
-        if user_query:
-            # Step A: Vectorize the user's input
-            query_vec = tfidf.transform([user_query])
-            
-            # Step B: Calculate Similarity
-            sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
-            df_products['score'] = sim_scores
-            
-            # Step C: Apply Filters (Budget + Category)
-            filtered_df = df_products[df_products['price'] <= max_price]
-            
-            if selected_cat != "All":
-                filtered_df = filtered_df[filtered_df['category'] == selected_cat]
-            
-            # Step D: Sort and Get Top 6
-            results = filtered_df.sort_values('score', ascending=False).head(6)
-
-            # 3. DISPLAY RESULTS
-            if not results.empty and results['score'].max() > 0:
-                st.success(f"Top matches for '{user_query}' under ${max_price}:")
-                
-                cols = st.columns(3)
-                for i, row in enumerate(results.itertuples()):
-                    with cols[i % 3]:
-                        # Optional: Use a placeholder image based on category
-                        st.image(f"https://via.placeholder.com/300x200.png?text={row.category}")
-                        st.write(f"**{row.product_name}**") # You can hide this if preferred
-                        st.write(f"Price: ${row.price} | Match: {row.score:.1%}")
-            else:
-                st.warning("No products found matching those criteria. Try a higher budget or different keywords.")
-        else:
-            st.error("Please enter a search term first!")
+if st.button("✨ Get Recommendations"):
+    query_vec = tfidf.transform([user_query])
+    sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
+    df_products['score'] = sim_scores
+    
+    # Filter by budget
+    results = df_products[df_products['price'] <= max_budget].sort_values('score', ascending=False).head(6)
+    
+    if not results.empty and results['score'].max() > 0:
+        cols = st.columns(3)
+        for i, row in enumerate(results.itertuples()):
+            with cols[i % 3]:
+                st.info(f"**{row.product_name}**\n\nPrice: ${row.price}")
+    else:
+        # This tells you WHY nothing appeared
+        st.warning("No products found! Try increasing your budget or checking your search terms.")
 
 with t2:
     if st.session_state.get('admin_logged_in'):
@@ -184,7 +174,6 @@ y_true, y_pred = get_confusion_data(df_products, cosine_sim)
 cm = confusion_matrix(y_true, y_pred)
 
 # 2. CREATE A SMALLER PLOT
-# figsize=(3, 2) makes it small and compact
 fig, ax = plt.subplots(figsize=(4, 3)) 
 
 sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
@@ -193,7 +182,6 @@ sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
             xticklabels=['Not Rel', 'Rel'], 
             yticklabels=['Not Rel', 'Rel'])
 
-# Adjust labels for a clean look
 plt.ylabel('Actual', fontsize=8)
 plt.xlabel('Predicted', fontsize=8)
 plt.xticks(fontsize=8)
@@ -202,7 +190,7 @@ plt.yticks(fontsize=8)
 # 3. Use columns to center it or keep it to one side
 col1, col2 = st.columns([1, 2]) 
 with col1:
-    st.pyplot(fig) # This displays the smaller version
+    st.pyplot(fig) 
 with col2:
     st.write("**Model Accuracy Insights**")
     st.caption("This matrix shows how often the AI matches the correct category.")
@@ -221,7 +209,7 @@ comparison_df = pd.DataFrame({
     'Score': [0.95, 0.20, 0.85, 0.45] # Hybrid usually has better recall but slightly lower precision
 })
 
-st.write("Comparing the 'Simple' model vs. your 'Feature Soup' model:")
+st.write("Comparing the 'Simple' model vs. 'Feature Soup' model:")
 st.vega_lite_chart(comparison_df, {
     'mark': {'type': 'bar', 'tooltip': True},
     'encoding': {
