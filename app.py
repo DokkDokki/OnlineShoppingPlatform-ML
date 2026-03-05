@@ -136,7 +136,7 @@ if st.button("✨ Get Recommendations"):
     df_products['score'] = sim_scores
     
     # Filter by budget
-    results = df_products[df_products['price'] <= max_budget].sort_values('score', ascending=False).head(6)
+    results = df_products[df_products['price'] <= max_price].sort_values('score', ascending=False).head(6)
     
     if not results.empty and results['score'].max() > 0:
         cols = st.columns(3)
