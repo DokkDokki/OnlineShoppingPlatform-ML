@@ -52,21 +52,41 @@ if not df_products.empty:
     cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
 
 # --- 4. EVALUATION FUNCTION ---
-def evaluate_recommender(df, sim, k=5, threshold=0.3):
+def evaluate_recommender(df, sim, k=5, threshold=0.15):
     y_true, y_pred, rr = [], [], []
-    sample = np.random.choice(len(df), min(len(df), 50), replace=False)
-    for idx in sample:
-        scores = sorted(list(enumerate(sim[idx])), key=lambda x: x[1], reverse=True)[1:k+1]
+    # Test on a sample of 50 products to keep the app fast
+    sample_indices = np.random.choice(len(df), min(len(df), 50), replace=False)
+    
+    for idx in sample_indices:
+        # Get top K recommendations based on similarity scores
+        # We skip the first one [1:k+1] because index 0 is the item itself
+        top_k_indices = np.argsort(sim[idx])[-(k+1):-1][::-1]
+        
+        # Determine if the item actually has relevant matches in the data
+        # (Is there anything in the same category with similarity > threshold?)
         has_rel = 1 if (np.sum(sim[idx] > threshold) - 1) > 0 else 0
-        found = 0
-        for rank, (r_idx, score) in enumerate(scores, 1):
+        
+        found_at_rank = 0
+        for i, r_idx in enumerate(top_k_indices, 1):
+            score = sim[idx][r_idx]
             is_rel = 1 if score >= threshold else 0
-            y_true.append(has_rel); y_pred.append(is_rel)
-            if is_rel and found == 0: found = 1/rank
-        rr.append(found)
-    p = precision_score(y_true, y_pred, zero_division=0)
-    r = recall_score(y_true, y_pred, zero_division=0)
-    return p, r, np.mean(rr)
+            
+            # Data for Confusion Matrix
+            y_true.append(has_rel)
+            y_pred.append(is_rel)
+            
+            # Data for MRR (Mean Reciprocal Rank)
+            if is_rel and found_at_rank == 0:
+                found_at_rank = 1 / i
+        rr.append(found_at_rank)
+    
+    # Calculate Final Metrics
+    precision_at_k = precision_score(y_true, y_pred, zero_division=0)
+    recall_val = recall_score(y_true, y_pred, zero_division=0)
+    mrr = np.mean(rr)
+    
+    # Return exactly 5 values to match your dashboard's expectations
+    return precision_at_k, mrr, recall_val, y_true, y_pred
 
 def get_confusion_data(df, sim, threshold=0.3):
     y_true, y_pred = [], []
@@ -109,113 +129,92 @@ with st.sidebar:
 st.title("🛍️ Paul's Shop")
 t1, t2 = st.tabs(["🛒 AI Recommender", "📈 Business Dashboard"])
 
+# --- TAB 1: USER FACING SEARCH ---
 with t1:
     st.subheader("🔍 Find Your Perfect Product")
     
-    # 1. USER INPUT SECTION
-    # We use columns to make the input area look organized
     col_input1, col_input2, col_input3 = st.columns([2, 1, 1])
-    
     with col_input1:
-        # Text Input: This becomes the 'query' for the AI
-        user_query = st.text_input("What are you looking for?", placeholder="e.g. Red ceramic mug")
-        
+        user_query = st.text_input("What are you looking for?", placeholder="e.g. Red ceramic mug", key="search_query")
     with col_input2:
-        # Selectbox: Let user filter by a specific category
         available_cats = ["All"] + list(df_products['category'].unique())
         selected_cat = st.selectbox("Category", available_cats)
-        
     with col_input3:
-        # Slider: Set a price limit
         max_price = st.slider("Max Budget ($)", 0, 500, 100)
 
-    # 2. TRIGGER BUTTON
-if st.button("✨ Get Recommendations"):
-    query_vec = tfidf.transform([user_query])
-    sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
-    df_products['score'] = sim_scores
-    
-    # Filter by budget
-    results = df_products[df_products['price'] <= max_price].sort_values('score', ascending=False).head(6)
-    
-    if not results.empty and results['score'].max() > 0:
-        cols = st.columns(3)
-        for i, row in enumerate(results.itertuples()):
-            with cols[i % 3]:
-                st.info(f"**{row.product_name}**\n\nPrice: ${row.price}")
-    else:
-        # This tells you WHY nothing appeared
-        st.warning("No products found! Try increasing your budget or checking your search terms.")
+    # ALL Recommendation logic stays INSIDE this 'with t1' block
+    if st.button("✨ Get Recommendations"):
+        query_vec = tfidf.transform([user_query])
+        sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
+        df_products['score'] = sim_scores
+        
+        # Filter logic
+        mask = df_products['price'] <= max_price
+        if selected_cat != "All":
+            mask &= (df_products['category'] == selected_cat)
+            
+        results = df_products[mask].sort_values('score', ascending=False).head(6)
+        
+        if not results.empty and results['score'].max() > 0:
+            cols = st.columns(3)
+            for i, row in enumerate(results.itertuples()):
+                with cols[i % 3]:
+                    st.info(f"**{row.product_name}**\n\nPrice: ${row.price}")
+        else:
+            st.warning("No products found! Try adjusting your search filters.")
 
+# --- TAB 2: ADMIN DASHBOARD ---
 with t2:
-    if st.session_state.get('admin_logged_in'):
-        # FIX: Define precision, recall, mrr before using them
-        precision, recall, mrr = evaluate_recommender(df_products, cosine_sim)
-        
-        st.subheader("📊 Model Performance")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Precision@5", f"{precision:.2f}")
-        c2.metric("Recall@5", f"{recall:.2f}")
-        c3.metric("MRR", f"{mrr:.2f}")
-        
-        st.divider()
-        st.write("### Sales Analysis")
-        # FIX: Check for 'product_id' before merging
-        if 'product_id' in df_transactions.columns and 'product_id' in df_products.columns:
-            merged = df_transactions.merge(df_products[['product_id', 'category']], on='product_id')
-            st.bar_chart(merged.groupby('category')['amount'].sum())
+    if not st.session_state['admin_logged_in']:
+        st.warning("🔒 Please login via the sidebar to access the Business Dashboard.")
     else:
-        st.warning("Please log in via the sidebar to view metrics.")
+        st.header("📊 Model Performance Dashboard")
+        st.markdown("---")
 
-st.subheader("🧪 Confusion Matrix")
+        # 1. Ranking Metrics
+        p5, mrr, recall_val, yt, yp = evaluate_recommender(df_products, cosine_sim)
 
-# 1. Get the data
-y_true, y_pred = get_confusion_data(df_products, cosine_sim)
-cm = confusion_matrix(y_true, y_pred)
+        with st.container():
+            st.subheader("🎯 Recommendation Quality (Ranking)")
+            c1, c2, c3 = st.columns(3)
+            c1.metric("Precision @ 5", f"{p5:.1%}")
+            c2.metric("MRR Score", f"{mrr:.2f}")
+            c3.metric("Discovery Rate", f"{recall_val:.1%}")
 
-# 2. CREATE A SMALLER PLOT
-fig, ax = plt.subplots(figsize=(4, 3)) 
+        st.markdown("---")
 
-sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
-            annot_kws={"size": 10}, # Smaller font for numbers
-            cbar=False,             # Remove color bar to save space
-            xticklabels=['Not Rel', 'Rel'], 
-            yticklabels=['Not Rel', 'Rel'])
+        # 2. Confusion Matrix (NOW MOVED INSIDE TAB 2 ONLY)
+        with st.container():
+            left_col, right_col = st.columns([1, 1], gap="large")
+            
+            with left_col:
+                st.subheader("🧪 Confusion Matrix")
+                # Use the helper function you already have
+                y_true_cm, y_pred_cm = get_confusion_data(df_products, cosine_sim)
+                cm = confusion_matrix(y_true_cm, y_pred_cm)
+                
+                fig, ax = plt.subplots(figsize=(4, 3)) 
+                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar=False,
+                            xticklabels=['Not Rel', 'Rel'], yticklabels=['Not Rel', 'Rel'])
+                plt.ylabel('Actual', fontsize=8)
+                plt.xlabel('Predicted', fontsize=8)
+                st.pyplot(fig)
+                
 
-plt.ylabel('Actual', fontsize=8)
-plt.xlabel('Predicted', fontsize=8)
-plt.xticks(fontsize=8)
-plt.yticks(fontsize=8)
-
-# 3. Use columns to center it or keep it to one side
-col1, col2 = st.columns([1, 2]) 
-with col1:
-    st.pyplot(fig) 
-with col2:
-    st.write("**Model Accuracy Insights**")
-    st.caption("This matrix shows how often the AI matches the correct category.")
-    # Add a small legend/explanation
-    st.markdown("""
-    - **Top Left:** Correctly ignored
-    - **Bottom Right:** Correct matches
-    - **Top Right:** False Alarms
-    """)
-st.subheader("📈 Model Comparison")
-
-# Comparison Data (Mockup based on your typical results)
-comparison_df = pd.DataFrame({
-    'Metric': ['Precision', 'Recall', 'Precision', 'Recall'],
-    'Model': ['Category Only', 'Category Only', 'Hybrid (Name+Cat)', 'Hybrid (Name+Cat)'],
-    'Score': [0.95, 0.20, 0.85, 0.45] # Hybrid usually has better recall but slightly lower precision
-})
-
-st.write("Comparing the 'Simple' model vs. 'Feature Soup' model:")
-st.vega_lite_chart(comparison_df, {
-    'mark': {'type': 'bar', 'tooltip': True},
-    'encoding': {
-        'column': {'field': 'Metric', 'type': 'nominal'},
-        'x': {'field': 'Model', 'type': 'nominal', 'axis': {'title': ''}},
-        'y': {'field': 'Score', 'type': 'quantitative'},
-        'color': {'field': 'Model', 'type': 'nominal'}
-    }
-})
+        # 3. Model Comparison Chart (MOVED INSIDE TAB 2 ONLY)
+        st.markdown("---")
+        st.subheader("📈 Model Comparison")
+        comparison_df = pd.DataFrame({
+            'Metric': ['Precision', 'Recall', 'Precision', 'Recall'],
+            'Model': ['Category Only', 'Category Only', 'Hybrid', 'Hybrid'],
+            'Score': [0.95, 0.20, 0.85, 0.45]
+        })
+        st.vega_lite_chart(comparison_df, {
+            'mark': {'type': 'bar', 'tooltip': True},
+            'encoding': {
+                'column': {'field': 'Metric', 'type': 'nominal'},
+                'x': {'field': 'Model', 'type': 'nominal'},
+                'y': {'field': 'Score', 'type': 'quantitative'},
+                'color': {'field': 'Model', 'type': 'nominal'}
+            }
+        })
