@@ -221,13 +221,6 @@ with t2:
                 plt.xlabel('AI Predicted')
                 st.pyplot(fig)
         
-        with col_right:
-            st.subheader("📝 Analysis")
-            if is_sbert:
-                st.info("SBERT captures **meaning**. Its matrix now uses a 95th-percentile threshold to show how it separates top matches from general items.")
-            else:
-                st.info("TF-IDF is **keyword-based**. It excels at spotting exact category matches but has lower recall for synonyms.")
-
         # 3. Final Fixed Comparison Chart
         st.markdown("---")
         st.subheader("📈 Model Comparison")
@@ -253,4 +246,3 @@ with t2:
             }
         })
                 
-
