@@ -153,7 +153,7 @@ with t1:
         if selected_cat != "All":
             mask &= (df_products['category'] == selected_cat)
             
-        results = df_products[mask].sort_values('score', ascending=False).head(6)
+        results = df_products[mask].sort_values('score', ascending=False).head(100)
         
         if not results.empty and results['score'].max() > 0:
             cols = st.columns(3)
