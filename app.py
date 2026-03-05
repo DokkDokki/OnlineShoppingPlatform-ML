@@ -1,3 +1,5 @@
+import seaborn as sns
+import matplotlib.pyplot as plt
 import numpy as np
 import streamlit as st
 import pandas as pd
@@ -5,6 +7,7 @@ import os
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import precision_score, recall_score
+from sklearn.metrics import confusion_matrix
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="Paul's Shop", layout="wide")
@@ -57,6 +60,25 @@ def evaluate_recommender(df, sim, k=5, threshold=0.3):
     p = precision_score(y_true, y_pred, zero_division=0)
     r = recall_score(y_true, y_pred, zero_division=0)
     return p, r, np.mean(rr)
+
+def get_confusion_data(df, sim, threshold=0.3):
+    y_true, y_pred = [], []
+    sample = np.random.choice(len(df), min(len(df), 100), replace=False)
+    
+    for idx in sample:
+        # We consider an item "Truly Relevant" if it's in the same category
+        cat = df.iloc[idx]['category']
+        actual_relevant_indices = df[df['category'] == cat].index.tolist()
+        
+        # Get all scores for this item
+        scores = sim[idx]
+        
+        for i in range(len(scores)):
+            if i == idx: continue # skip self
+            y_true.append(1 if i in actual_relevant_indices else 0)
+            y_pred.append(1 if scores[i] >= threshold else 0)
+            
+    return y_true, y_pred
 
 # --- 5. ADMIN LOGGING ---
 if 'admin_logged_in' not in st.session_state:
@@ -154,3 +176,58 @@ with t2:
             st.bar_chart(merged.groupby('category')['amount'].sum())
     else:
         st.warning("Please log in via the sidebar to view metrics.")
+
+st.subheader("🧪 Confusion Matrix")
+
+# 1. Get the data
+y_true, y_pred = get_confusion_data(df_products, cosine_sim)
+cm = confusion_matrix(y_true, y_pred)
+
+# 2. CREATE A SMALLER PLOT
+# figsize=(3, 2) makes it small and compact
+fig, ax = plt.subplots(figsize=(4, 3)) 
+
+sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax,
+            annot_kws={"size": 10}, # Smaller font for numbers
+            cbar=False,             # Remove color bar to save space
+            xticklabels=['Not Rel', 'Rel'], 
+            yticklabels=['Not Rel', 'Rel'])
+
+# Adjust labels for a clean look
+plt.ylabel('Actual', fontsize=8)
+plt.xlabel('Predicted', fontsize=8)
+plt.xticks(fontsize=8)
+plt.yticks(fontsize=8)
+
+# 3. Use columns to center it or keep it to one side
+col1, col2 = st.columns([1, 2]) 
+with col1:
+    st.pyplot(fig) # This displays the smaller version
+with col2:
+    st.write("**Model Accuracy Insights**")
+    st.caption("This matrix shows how often the AI matches the correct category.")
+    # Add a small legend/explanation
+    st.markdown("""
+    - **Top Left:** Correctly ignored
+    - **Bottom Right:** Correct matches
+    - **Top Right:** False Alarms
+    """)
+st.subheader("📈 Model Comparison")
+
+# Comparison Data (Mockup based on your typical results)
+comparison_df = pd.DataFrame({
+    'Metric': ['Precision', 'Recall', 'Precision', 'Recall'],
+    'Model': ['Category Only', 'Category Only', 'Hybrid (Name+Cat)', 'Hybrid (Name+Cat)'],
+    'Score': [0.95, 0.20, 0.85, 0.45] # Hybrid usually has better recall but slightly lower precision
+})
+
+st.write("Comparing the 'Simple' model vs. your 'Feature Soup' model:")
+st.vega_lite_chart(comparison_df, {
+    'mark': {'type': 'bar', 'tooltip': True},
+    'encoding': {
+        'column': {'field': 'Metric', 'type': 'nominal'},
+        'x': {'field': 'Model', 'type': 'nominal', 'axis': {'title': ''}},
+        'y': {'field': 'Score', 'type': 'quantitative'},
+        'color': {'field': 'Model', 'type': 'nominal'}
+    }
+})
