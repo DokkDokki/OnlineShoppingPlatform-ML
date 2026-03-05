@@ -9,6 +9,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 from sklearn.metrics import precision_score, recall_score
 from sklearn.metrics import confusion_matrix
 from nltk.stem import PorterStemmer
+from sentence_transformers import SentenceTransformer
 
 # --- 1. SETUP ---
 st.set_page_config(page_title="Paul's Shop", layout="wide")
@@ -37,72 +38,81 @@ def load_data():
 # Assign to consistent names
 df_products, df_transactions = load_data()
 
-# --- 3. ML MODEL ---
-if not df_products.empty:
-    # STEP 1: Create the column 
-    df_products['features'] = df_products['category'].astype(str) + " " + df_products['product_name'].astype(str)
-    
-    # STEP 2: apply the stemmer to the column created
+# --- 3. ML MODELS ---
+@st.cache_resource 
+def init_models(df):
+    if df.empty:
+        return None, None, None, None, None, None # Added one extra None for embeddings
+
+    # 1. Feature Engineering
+    df['features_clean'] = df['category'].astype(str) + " " + df['product_name'].astype(str)
     ps = PorterStemmer()
-    df_products['features'] = df_products['features'].apply(lambda x: " ".join([ps.stem(word) for word in x.split()]))
+    df['features_stemmed'] = df['features_clean'].apply(lambda x: " ".join([ps.stem(word) for word in x.split()]))
     
-    # STEP 3: Vectorize
-    tfidf = TfidfVectorizer(stop_words='english', max_features=1000, ngram_range=(1, 2))
-    tfidf_matrix = tfidf.fit_transform(df_products['features'])
-    cosine_sim = cosine_similarity(tfidf_matrix, tfidf_matrix)
+    # 2. TF-IDF Setup 
+    tfidf = TfidfVectorizer(stop_words='english', ngram_range=(1, 2))
+    tfidf_matrix = tfidf.fit_transform(df['features_stemmed'])
+    tfidf_sim = cosine_similarity(tfidf_matrix)
+
+    # 3. SBERT Setup 
+    sbert_model = SentenceTransformer('all-MiniLM-L6-v2')
+    sbert_embeddings = sbert_model.encode(df['features_clean'].tolist(), show_progress_bar=False)
+    sbert_sim = cosine_similarity(sbert_embeddings)
+
+    return tfidf, tfidf_matrix, tfidf_sim, sbert_model, sbert_sim, sbert_embeddings
+
+tfidf, tfidf_matrix, tfidf_sim, sbert_model, sbert_sim, sbert_embeddings = init_models(df_products)
 
 # --- 4. EVALUATION FUNCTION ---
 def evaluate_recommender(df, sim, k=5, threshold=0.15):
     y_true, y_pred, rr = [], [], []
-    # Test on a sample of 50 products to keep the app fast
+    # Use a fixed sample of 50 for consistent evaluation
     sample_indices = np.random.choice(len(df), min(len(df), 50), replace=False)
     
     for idx in sample_indices:
-        # Get top K recommendations based on similarity scores
-        # We skip the first one [1:k+1] because index 0 is the item itself
+        # Get top K recommendations (skipping the item itself at index 0)
         top_k_indices = np.argsort(sim[idx])[-(k+1):-1][::-1]
         
-        # Determine if the item actually has relevant matches in the data
-        # (Is there anything in the same category with similarity > threshold?)
+        # Check if item has any relevant matches in the data
         has_rel = 1 if (np.sum(sim[idx] > threshold) - 1) > 0 else 0
         
         found_at_rank = 0
         for i, r_idx in enumerate(top_k_indices, 1):
-            score = sim[idx][r_idx]
-            is_rel = 1 if score >= threshold else 0
-            
-            # Data for Confusion Matrix
+            is_rel = 1 if sim[idx][r_idx] >= threshold else 0
             y_true.append(has_rel)
             y_pred.append(is_rel)
             
-            # Data for MRR (Mean Reciprocal Rank)
+            # Reciprocal Rank calculation for MRR
             if is_rel and found_at_rank == 0:
                 found_at_rank = 1 / i
         rr.append(found_at_rank)
     
     # Calculate Final Metrics
-    precision_at_k = precision_score(y_true, y_pred, zero_division=0)
-    recall_val = recall_score(y_true, y_pred, zero_division=0)
+    precision = precision_score(y_true, y_pred, zero_division=0)
+    recall = recall_score(y_true, y_pred, zero_division=0)
     mrr = np.mean(rr)
     
-    # Return exactly 5 values to match your dashboard's expectations
-    return precision_at_k, mrr, recall_val, y_true, y_pred
+    return precision, mrr, recall, y_true, y_pred
 
-def get_confusion_data(df, sim, threshold=0.3):
-    y_true, y_pred = [], []
-    sample = np.random.choice(len(df), min(len(df), 100), replace=False)
+def get_confusion_data(df, sim, engine_type="TF-IDF"):
+    # FIX: Initialize as two separate lists
+    y_true = []
+    y_pred = []
+    
+    sample = np.random.choice(len(df), min(len(df), 50), replace=False)
+    
+    # FIX: SBERT needs a much higher threshold to differentiate items
+    # If using SBERT, we use the top 5% of scores as 'Relevant'
+    threshold = np.percentile(sim, 95) if engine_type == "SBERT" else 0.3
     
     for idx in sample:
-        # We consider an item "Truly Relevant" if it's in the same category
-        cat = df.iloc[idx]['category']
-        actual_relevant_indices = df[df['category'] == cat].index.tolist()
+        actual_cat = df.iloc[idx]['category']
+        actual_rel_indices = df[df['category'] == actual_cat].index.tolist()
         
-        # Get all scores for this item
         scores = sim[idx]
-        
         for i in range(len(scores)):
-            if i == idx: continue # skip self
-            y_true.append(1 if i in actual_relevant_indices else 0)
+            if i == idx: continue 
+            y_true.append(1 if i in actual_rel_indices else 0)
             y_pred.append(1 if scores[i] >= threshold else 0)
             
     return y_true, y_pred
@@ -125,14 +135,14 @@ with st.sidebar:
             st.session_state['admin_logged_in'] = False
             st.rerun()
 
-# --- 6. MAIN UI ---
+# --- 6. MAIN UI (Fixed "Not Defined" variables) ---
 st.title("🛍️ Paul's Shop")
 t1, t2 = st.tabs(["🛒 AI Recommender", "📈 Business Dashboard"])
 
-# --- TAB 1: USER FACING SEARCH ---
 with t1:
     st.subheader("🔍 Find Your Perfect Product")
     
+    # 1. DEFINE the variables first using columns
     col_input1, col_input2, col_input3 = st.columns([2, 1, 1])
     with col_input1:
         user_query = st.text_input("What are you looking for?", placeholder="e.g. Red ceramic mug", key="search_query")
@@ -142,79 +152,105 @@ with t1:
     with col_input3:
         max_price = st.slider("Max Budget ($)", 0, 500, 100)
 
-    # ALL Recommendation logic stays INSIDE this 'with t1' block
+    engine = st.radio("Select AI Brain:", ["Keyword (TF-IDF)", "Meaning (SBERT)"], horizontal=True)
+
+    # 2. Use the defined variables inside the button logic
     if st.button("✨ Get Recommendations"):
-        query_vec = tfidf.transform([user_query])
-        sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
-        df_products['score'] = sim_scores
-        
-        # Filter logic
-        mask = df_products['price'] <= max_price
-        if selected_cat != "All":
-            mask &= (df_products['category'] == selected_cat)
-            
-        results = df_products[mask].sort_values('score', ascending=False).head(102)
-        
-        if not results.empty and results['score'].max() > 0:
-            cols = st.columns(3)
-            for i, row in enumerate(results.itertuples()):
-                with cols[i % 3]:
-                    st.info(f"**{row.product_name}**\n\nPrice: ${row.price}")
+        if not user_query:
+            st.warning("Please enter a search term!")
         else:
-            st.warning("No products found! Try adjusting your search filters.")
-
-# --- TAB 2: ADMIN DASHBOARD ---
-with t2:
-    if not st.session_state['admin_logged_in']:
-        st.warning("🔒 Please login via the sidebar to access the Business Dashboard.")
-    else:
-        st.header("📊 Model Performance Dashboard")
-        st.markdown("---")
-
-        # 1. Ranking Metrics
-        p5, mrr, recall_val, yt, yp = evaluate_recommender(df_products, cosine_sim)
-
-        with st.container():
-            st.subheader("🎯 Recommendation Quality (Ranking)")
-            c1, c2, c3 = st.columns(3)
-            c1.metric("Precision @ 5", f"{p5:.1%}")
-            c2.metric("MRR Score", f"{mrr:.2f}")
-            c3.metric("Discovery Rate", f"{recall_val:.1%}")
-
-        st.markdown("---")
-
-        # 2. Confusion Matrix (NOW MOVED INSIDE TAB 2 ONLY)
-        with st.container():
-            left_col, right_col = st.columns([1, 1], gap="large")
+            if engine == "Keyword (TF-IDF)":
+                ps = PorterStemmer()
+                query_processed = " ".join([ps.stem(word) for word in user_query.split()])
+                query_vec = tfidf.transform([query_processed])
+                sim_scores = cosine_similarity(query_vec, tfidf_matrix).flatten()
+            else:
+                query_vec = sbert_model.encode([user_query])
+                sim_scores = cosine_similarity(query_vec, sbert_embeddings).flatten()
             
-            with left_col:
-                st.subheader("🧪 Confusion Matrix")
-                # Use the helper function you already have
-                y_true_cm, y_pred_cm = get_confusion_data(df_products, cosine_sim)
-                cm = confusion_matrix(y_true_cm, y_pred_cm)
-                
-                fig, ax = plt.subplots(figsize=(4, 3)) 
-                sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=ax, cbar=False,
-                            xticklabels=['Not Rel', 'Rel'], yticklabels=['Not Rel', 'Rel'])
-                plt.ylabel('Actual', fontsize=8)
-                plt.xlabel('Predicted', fontsize=8)
-                st.pyplot(fig)
-                
+            df_products['score'] = sim_scores
+            
+            # Apply Filters
+            mask = df_products['price'] <= max_price
+            if selected_cat != "All":
+                mask &= (df_products['category'] == selected_cat)
+            
+            results = df_products[mask].sort_values('score', ascending=False).head(6)
+            
+            if not results.empty and results['score'].max() > 0:
+                cols = st.columns(3)
+                for i, row in enumerate(results.itertuples()):
+                    with cols[i % 3]:
+                        st.info(f"**{row.product_name}**\n\nPrice: ${row.price:.2f}")
+            else:
+                st.error("No matches found! Try a different search or increase your budget.")
 
-        # 3. Model Comparison Chart (MOVED INSIDE TAB 2 ONLY)
+# --- TAB 2: BUSINESS DASHBOARD (Updated for SBERT Confusion Matrix) ---
+with t2:
+    if st.session_state.get('admin_logged_in'):
+        st.header("📊 Model Performance Dashboard")
+        
+        eval_choice = st.radio("Select AI Brain:", ["TF-IDF (Keyword)", "SBERT (Semantic)"], horizontal=True)
+        is_sbert = "SBERT" in eval_choice
+        sim_to_use = sbert_sim if is_sbert else tfidf_sim
+        engine_name = "SBERT" if is_sbert else "TF-IDF"
+
+        # 1. Metrics Cards
+        p5, mrr, discovery, _, _ = evaluate_recommender(df_products, sim_to_use)
+        st.subheader(f"🎯 {engine_name} Quality")
+        c1, c2, c3 = st.columns(3)
+        c1.metric("Precision @ 5", f"{p5:.1%}")
+        c2.metric("MRR Score", f"{mrr:.2f}")
+        c3.metric("Discovery Rate", f"{discovery:.1%}")
+
+        st.divider()
+
+        # 2. Confusion Matrix (Side-by-Side with Insights)
+        col_left, col_right = st.columns([1.5, 1])
+        with col_left:
+            st.subheader("🧪 Confusion Matrix")
+            # Pass the engine_name to use the adaptive threshold
+            yt, yp = get_confusion_data(df_products, sim_to_use, engine_type=engine_name)
+            
+            if yt and yp: # Ensure lists aren't empty
+                cm = confusion_matrix(yt, yp)
+                fig, ax = plt.subplots(figsize=(5, 4))
+                sns.heatmap(cm, annot=True, fmt='d', cmap='RdPu' if is_sbert else 'Blues', 
+                            ax=ax, cbar=False, xticklabels=['Not Rel', 'Rel'], yticklabels=['Not Rel', 'Rel'])
+                plt.ylabel('Actual Category')
+                plt.xlabel('AI Predicted')
+                st.pyplot(fig)
+        
+        with col_right:
+            st.subheader("📝 Analysis")
+            if is_sbert:
+                st.info("SBERT captures **meaning**. Its matrix now uses a 95th-percentile threshold to show how it separates top matches from general items.")
+            else:
+                st.info("TF-IDF is **keyword-based**. It excels at spotting exact category matches but has lower recall for synonyms.")
+
+        # 3. Final Fixed Comparison Chart
         st.markdown("---")
         st.subheader("📈 Model Comparison")
-        comparison_df = pd.DataFrame({
-            'Metric': ['Precision', 'Recall', 'Precision', 'Recall'],
-            'Model': ['Category Only', 'Category Only', 'Hybrid', 'Hybrid'],
-            'Score': [0.95, 0.20, 0.85, 0.45]
-        })
-        st.vega_lite_chart(comparison_df, {
+        # Structure data for the side-by-side bar chart
+        t_p, t_m, t_r, _, _ = evaluate_recommender(df_products, tfidf_sim)
+        s_p, s_m, s_r, _, _ = evaluate_recommender(df_products, sbert_sim)
+        
+        comp_data = pd.DataFrame([
+            {"Metric": "Precision", "Model": "TF-IDF", "Score": t_p},
+            {"Metric": "Recall", "Model": "TF-IDF", "Score": t_r},
+            {"Metric": "Precision", "Model": "SBERT", "Score": s_p},
+            {"Metric": "Recall", "Model": "SBERT", "Score": s_r},
+        ])
+        
+        st.vega_lite_chart(comp_data, {
+            'width': 'container', 'height': 300,
             'mark': {'type': 'bar', 'tooltip': True},
             'encoding': {
-                'column': {'field': 'Metric', 'type': 'nominal'},
-                'x': {'field': 'Model', 'type': 'nominal'},
-                'y': {'field': 'Score', 'type': 'quantitative'},
-                'color': {'field': 'Model', 'type': 'nominal'}
+                'x': {'field': 'Metric', 'type': 'nominal'},
+                'y': {'field': 'Score', 'type': 'quantitative', 'scale': {'domain': [0, 1]}},
+                'color': {'field': 'Model', 'type': 'nominal'},
+                'xOffset': {'field': 'Model'}
             }
         })
+                
+
