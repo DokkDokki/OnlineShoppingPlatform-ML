@@ -2,7 +2,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 # 1. Load dataset
-df = pd.read_csv('data/data.csv', encoding='ISO-8859-1')
+df = pd.read_csv('data/products.csv', encoding='ISO-8859-1')
 
 # Diagnostic: Check columns and data types
 print("Columns found in CSV:", df.columns.tolist())
