@@ -207,25 +207,10 @@ with t2:
         c1, c2, c3 = st.columns(3)
         c1.metric("Precision @ 5", f"{p5:.1%}")
         c2.metric("MRR Score", f"{mrr:.2f}")
-        c3.metric("Discovery Rate", f"{discovery:.1%}")
+        c3.metric("Recall", f"{discovery:.1%}")
 
         st.divider()
 
-        # 2. Confusion Matrix (Side-by-Side with Insights)
-        col_left, col_right = st.columns([1.5, 1])
-        with col_left:
-            st.subheader("🧪 Confusion Matrix")
-            # Pass the engine_name to use the adaptive threshold
-            yt, yp = get_confusion_data(df_products, sim_to_use, engine_type=engine_name)
-            
-            if yt and yp: # Ensure lists aren't empty
-                cm = confusion_matrix(yt, yp)
-                fig, ax = plt.subplots(figsize=(5, 4))
-                sns.heatmap(cm, annot=True, fmt='d', cmap='RdPu' if is_sbert else 'Blues', 
-                            ax=ax, cbar=False, xticklabels=['Not Rel', 'Rel'], yticklabels=['Not Rel', 'Rel'])
-                plt.ylabel('Actual Category')
-                plt.xlabel('AI Predicted')
-                st.pyplot(fig)
         
         # 3. Final Fixed Comparison Chart
         st.markdown("---")
@@ -251,4 +236,6 @@ with t2:
                 'xOffset': {'field': 'Model'}
             }
         })
+
+
                 
