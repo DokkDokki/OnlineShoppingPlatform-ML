@@ -43,6 +43,8 @@ def load_data():
 # Assign to consistent names
 df_products, df_transactions = load_data()
 
+print("df_products shape:", df_products.shape)
+
 
 # --- 3. ML MODELS ---
 @st.cache_resource 
