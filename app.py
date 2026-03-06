@@ -24,7 +24,11 @@ def load_data():
     products = pd.read_csv('data/products.csv')
     transactions = pd.read_csv('data/transactions.csv')
 
-    # FIX: Handle missing 'purchase_date'
+    print("Products Duplcates :", products.duplicated().sum())
+    print("Transactions Duplcates :", products.duplicated().sum())
+
+
+    # Handle missing 'purchase_date'
     if 'purchase_date' not in transactions.columns:
         # Check for Kaggle's 'InvoiceDate'
         if 'InvoiceDate' in transactions.columns:
@@ -35,8 +39,10 @@ def load_data():
     transactions['purchase_date'] = pd.to_datetime(transactions['purchase_date'])
     return products, transactions
 
+
 # Assign to consistent names
 df_products, df_transactions = load_data()
+
 
 # --- 3. ML MODELS ---
 @st.cache_resource 
