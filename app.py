@@ -194,48 +194,87 @@ with t1:
 # --- TAB 2: BUSINESS DASHBOARD (Updated for SBERT Confusion Matrix) ---
 with t2:
     if st.session_state.get('admin_logged_in'):
+
         st.header("📊 Model Performance Dashboard")
-        
-        eval_choice = st.radio("Select AI Brain:", ["TF-IDF (Keyword)", "SBERT (Semantic)"], horizontal=True)
+
+        # ---------------- Model Selector ----------------
+        eval_choice = st.radio(
+            "Select AI Brain:",
+            ["TF-IDF (Keyword)", "SBERT (Semantic)"],
+            horizontal=True
+        )
+
         is_sbert = "SBERT" in eval_choice
         sim_to_use = sbert_sim if is_sbert else tfidf_sim
         engine_name = "SBERT" if is_sbert else "TF-IDF"
 
-        # 1. Metrics Cards
-        p5, mrr, discovery, _, _ = evaluate_recommender(df_products, sim_to_use)
+        # ---------------- Metric Cards ----------------
+        p5, mrr, recall, _, _ = evaluate_recommender(df_products, sim_to_use)
+
         st.subheader(f"🎯 {engine_name} Quality")
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Precision @ 5", f"{p5:.1%}")
-        c2.metric("MRR Score", f"{mrr:.2f}")
-        c3.metric("Recall", f"{discovery:.1%}")
+
+        col1, col2, col3 = st.columns(3)
+        col1.metric("Precision @ 5", f"{p5:.1%}")
+        col2.metric("MRR Score", f"{mrr:.2f}")
+        col3.metric("Recall", f"{recall:.1%}")
 
         st.divider()
 
-        
-        # 3. Final Fixed Comparison Chart
-        st.markdown("---")
-        st.subheader("📈 Model Comparison")
-        # Structure data for the side-by-side bar chart
-        t_p, t_m, t_r, _, _ = evaluate_recommender(df_products, tfidf_sim)
-        s_p, s_m, s_r, _, _ = evaluate_recommender(df_products, sbert_sim)
-        
-        comp_data = pd.DataFrame([
-            {"Metric": "Precision", "Model": "TF-IDF", "Score": t_p},
-            {"Metric": "Recall", "Model": "TF-IDF", "Score": t_r},
-            {"Metric": "Precision", "Model": "SBERT", "Score": s_p},
-            {"Metric": "Recall", "Model": "SBERT", "Score": s_r},
+        # ---------------- Calculate Metrics for Both Models ----------------
+        t_p, t_mrr, t_r, _, _ = evaluate_recommender(df_products, tfidf_sim)
+        s_p, s_mrr, s_r, _, _ = evaluate_recommender(df_products, sbert_sim)
+
+        # ---------------- Precision Comparison ----------------
+        st.subheader("📈 Precision Comparison")
+
+        precision_data = pd.DataFrame([
+            {"Model": "TF-IDF", "Score": t_p},
+            {"Model": "SBERT", "Score": s_p}
         ])
-        
-        st.vega_lite_chart(comp_data, {
-            'width': 'container', 'height': 300,
-            'mark': {'type': 'bar', 'tooltip': True},
-            'encoding': {
-                'x': {'field': 'Metric', 'type': 'nominal'},
-                'y': {'field': 'Score', 'type': 'quantitative', 'scale': {'domain': [0, 1]}},
-                'color': {'field': 'Model', 'type': 'nominal'},
-                'xOffset': {'field': 'Model'}
+
+        st.vega_lite_chart(precision_data, {
+            "width": "container",
+            "height": 300,
+            "mark": {"type": "bar", "tooltip": True},
+            "encoding": {
+                "x": {"field": "Model", "type": "nominal"},
+                "y": {"field": "Score", "type": "quantitative", "scale": {"domain": [0, 1]}}
             }
         })
 
+        # ---------------- Recall Comparison ----------------
+        st.subheader("📈 Recall Comparison")
 
+        recall_data = pd.DataFrame([
+            {"Model": "TF-IDF", "Score": t_r},
+            {"Model": "SBERT", "Score": s_r}
+        ])
+
+        st.vega_lite_chart(recall_data, {
+            "width": "container",
+            "height": 300,
+            "mark": {"type": "bar", "tooltip": True},
+            "encoding": {
+                "x": {"field": "Model", "type": "nominal"},
+                "y": {"field": "Score", "type": "quantitative", "scale": {"domain": [0, 1]}}
+            }
+        })
+
+        # ---------------- MRR Comparison ----------------
+        st.subheader("📈 MRR Comparison")
+
+        mrr_data = pd.DataFrame([
+            {"Model": "TF-IDF", "Score": t_mrr},
+            {"Model": "SBERT", "Score": s_mrr}
+        ])
+
+        st.vega_lite_chart(mrr_data, {
+            "width": "container",
+            "height": 300,
+            "mark": {"type": "bar", "tooltip": True},
+            "encoding": {
+                "x": {"field": "Model", "type": "nominal"},
+                "y": {"field": "Score", "type": "quantitative", "scale": {"domain": [0, 1]}}
+            }
+        })
                 
